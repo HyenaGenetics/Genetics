@@ -94,7 +94,7 @@ fit.mk2 <- find.mle(lik.mk2, x.init = 0.1)
 
 inputPanel(
   numericInput("n_steps", "Number of Iterations:", min = 100,
-               max = 50000, step = 10, value = 100),
+               max = 5000, step = 10, value = 100),
   
   radioButtons("prior","Prior Distribution:",
                c("Exponential (preference for low rates)" = "exp",
@@ -127,7 +127,7 @@ renderPlot({
     test <- samples()
     ggplot(test, aes(q10)) + 
     geom_density(color = "light blue", fill = "light blue", alpha = 0.6) + 
-    stat_function(fun = dexp, linetype = "dotdash", color = "red", 
+    stat_function(fun = dexp, linetype = "dotdash", color = "blue", 
                   args = (mean = 50)) + 
     geom_vline(xintercept = Q[1,2], linetype = "dotdash") + 
     xlim(0,0.15) +
