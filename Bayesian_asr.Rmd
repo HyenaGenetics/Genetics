@@ -1,0 +1,192 @@
+---
+title: "Ancestral State Reconstruction via Markov Chain Monte Carlo"
+runtime: shiny
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, include = FALSE}
+library(phytools)
+library(diversitree)
+library(ggplot2)
+```
+
+In this lab, we will take a brief look at estimating the rate of evolution (instantaneous transition rate) and corresponding ancestral states via Markov chain Monte Carlo. Our main focus will be on visualizing and interpreting the output of an MCMC analysis. 
+
+
+
+```{r,echo=FALSE}
+# Define function to make a normal prior 
+make.prior.normal <- function(mean, stdv){
+  function(pars) dnorm(pars, mean, stdv, log = TRUE)
+}
+```
+
+
+```{r,echo=FALSE}
+# Simulate tree and trait history ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Try simulating a tree and trait history 
+set.seed(1)
+tree <- tree.bd(pars = c(0.1, 0.0), max.taxa = 25)
+Q <- matrix(c(-0.03, 0.03, 0.03, -0.03), 2, 2)
+#rownames(Q) <- colnames(Q) <- letters[1:2]
+h <- sim.history(tree, Q)
+# 1 is blue 2 is gold
+cols <- setNames(c("#004165", "#eaab00"), c(1, 2))
+#cols <- setNames(c("red", "black"), c(1, 2))
+plotSimmap(h, cols)
+#add.simmap.legend(colors = cols, prompt = FALSE, vertical = FALSE, shape = "circle")
+print(Q)
+```
+
+We will again use simulated data so that we can compare our inferences against the true rate of evolution. 
+
+We will be using the same simulated data from the last lab but this time the number of taxa and rate of evoution will remain fixed. I have simulated a 25 taxa tree and the evolution of a discrete, binary character on it. The instaneous transition rate is set at 0.03. The tree and simulated history are plotted above. Below that I've printed the instantaneous rate matrix. 
+
+
+## MCMC Analysis 
+
+There are numerous subtleties to consider when performing a real MCMC analysis but for today we will keep it simple. We will only specify the number of iterations we would like our analysis to run, the starting point in parameter space, and the prior distribution. 
+
+I have initially set the number of iterations at a low value so that this document will load in a reasonable amount of time. When it comes to MCMC, more iterations are always better. This is because we want to be as sure as possible that we have converged on the true posterior distribution. Remember that an MCMC chain is guaranteed to to approximate the true posterior if it is allowed to wander through parameter space long enough. The problem is that there is no way to know what "long enough" actually is. So to be on the safe side it is always good to run as many iterations as is practical. 
+
+The starting point is arbitrary but in some cases it can be important. If the posterior distribution has multiple peaks it is possible that we could get stuck on one of the lower ones. The highest peak in parameter space is called the global optimum and the lower peaks are called local optima. One way to get around this problem is to run several different MCMC analyses and pick different, widely spaced starting points. If we converge on the same posterior each time there is a good chance we are finding the global optimum. 
+
+The prior is the weakest link in an MCMC analysis. When the amount of data is small (as in our case) the prior will strongly affect the posterior. In this case we must be able to justify our choice of prior. I've prepared three prior distributions that you can select from below.   
+
+Let's go ahead and take a look at the first plot. The red dashed line represents our prior distribution. Try switching between the three possible choices to see what they look like. 
+
+As you switch between priors you will notice the blue density curve changes as well. This is the posterior distribution of rates. 
+
+The vertical black dashed line marks the true value of the rate parameter. 
+
+
+The second plot is a trace plot of the rate parameter. The value of the rate parameter is on the y axis and the iteration number is on the x axis. This graph is one way to look at how the MCMC sampler moves through parameter space. 
+
+The third plot is our ancestral state reconstruction under our inferred disribution of rates. 
+
+The table lists the first 25 iterations of the MCMC analysis. 
+
+
+
+```{r,echo=FALSE}
+# Set up stuff to run mcmc interactively in next code chunk
+# Prep data for diversitree 
+states <- as.numeric(h$states)
+names(states) <- names(h$states)
+states[states == 1] <- 0
+states[states == 2] <- 1
+# Make likelihood function and constrain so that rates are equal
+lik.mk2 <- make.mk2(tree, states)
+lik.mk2 <- constrain(lik.mk2, q01 ~ q10)
+# Find ml estimate 
+fit.mk2 <- find.mle(lik.mk2, x.init = 0.1)
+```
+
+
+```{r,echo=FALSE}
+
+# Bayesian Analysis~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Estimate rate of evolution with mcmc using diversitree 
+
+inputPanel(
+  numericInput("n_steps", "Number of Iterations:", min = 100,
+               max = 50000, step = 10, value = 100),
+  
+  radioButtons("prior","Prior Distribution:",
+               c("Exponential (preference for low rates)" = "exp",
+                 "Uniform (all rates equally likely)" = "unif",
+                 "Normal (preference for high rates)" = "norm")),
+  
+  numericInput("x_init", "Starting point:", min = 0.001,
+               max = 9.999, step = 0.01, value = 0.06)
+  
+)
+
+
+# Make a prior function and run mcmc
+#prior.uniform <- make.prior.uniform(0,10)
+prior.dist <- reactive({
+  prior <- switch(input$prior,
+                exp = make.prior.exponential(50),
+                unif = make.prior.uniform(0,10),
+                norm = make.prior.normal(0.1,0.01))
+
+})
+
+
+#prior.exp <- make.prior.exponential(10)
+samples <- reactive({mcmc(lik.mk2, x.init = input$x_init, nsteps = input$n_steps, 
+                          prior = prior.dist(), w = 0.1, print.every = 0)})
+
+renderPlot({
+  if(input$prior == "exp") {
+    test <- samples()
+    ggplot(test, aes(q10)) + 
+    geom_density(color = "light blue", fill = "light blue", alpha = 0.6) + 
+    stat_function(fun = dexp, linetype = "dotdash", color = "red", 
+                  args = (mean = 50)) + 
+    geom_vline(xintercept = Q[1,2], linetype = "dotdash") + 
+    xlim(0,0.15) +
+    ylim(0,50) +
+    ggtitle("Posterior Distribution of Transition Rate") +
+    xlab("Transition Rate") +
+    ylab("Probability Density")
+  }
+  else if (input$prior == "unif") {
+    test <- samples()
+    ggplot(test, aes(q10)) + 
+    geom_density(color = "light blue", fill = "light blue", alpha = 0.6) + 
+    stat_function(fun = dunif, linetype = "dotdash", color = "red", 
+                  args = c(0,10)) + 
+    geom_vline(xintercept = Q[1,2], linetype = "dotdash") + 
+    xlim(0,0.15) +
+    ylim(0,50) +
+    ggtitle("Posterior Distribution of Transition Rate") +
+    xlab("Transition Rate") +
+    ylab("Probability Density")
+  }
+  else {
+     test <- samples()
+    ggplot(test, aes(q10)) + 
+    geom_density(color = "light blue", fill = "light blue", alpha = 0.6) + 
+    stat_function(fun = dnorm, linetype = "dotdash", color = "red", 
+                  args = c(0.1,0.01)) + 
+    geom_vline(xintercept = Q[1,2], linetype = "dotdash") + 
+    xlim(0,0.15) +
+    ylim(0,50) +
+    ggtitle("Posterior Distribution of Transition Rate") +
+    xlab("Transition Rate") +
+    ylab("Probability Density")
+  }
+})
+
+renderPlot({
+  test <- samples()
+  ggplot(test, aes(x = i, y = q10)) + geom_line(color = "light blue") +
+    ggtitle("Trace Plot of Transition Rate") +
+    xlab("Iteration") +
+    ylab("Transition Rate")
+})
+
+
+renderPlot({
+  # Get marginal asr for all samples from mcmc and plot 
+  test <- samples()
+  st.2 <- apply(test[2], 1, function(x) asr.marginal(lik.mk2, x)[2,])
+  st.2.avg <- rowMeans(st.2)
+  plotSimmap(h, cols)
+  nodelabels(pie = 1 - st.2.avg, piecol = cols, cex = 0.4)
+}) 
+
+renderTable({
+  test <- samples()
+  head(test, 25)
+})
+```
+
+
+
